@@ -1,11 +1,11 @@
-import  torch, os
-import  numpy as np
-from    MiniImagenet import MiniImagenet
-import  scipy.stats
-from    torch.utils.data import DataLoader
-from    torch.optim import lr_scheduler
-import  random, sys, pickle
-import  argparse
+import torch, os
+import numpy as np
+from MiniImagenet import MiniImagenet
+import scipy.stats
+from torch.utils.data import DataLoader
+from torch.optim import lr_scheduler
+import random, sys, pickle
+import argparse
 
 from meta import Meta
 
@@ -18,7 +18,6 @@ def mean_confidence_interval(accs, confidence=0.95):
 
 
 def main():
-
     torch.manual_seed(222)
     torch.cuda.manual_seed_all(222)
     np.random.seed(222)
@@ -47,24 +46,28 @@ def main():
     ]
 
     device = torch.device('cuda')
+    print("device:", device)
+
     maml = Meta(args, config).to(device)
 
     tmp = filter(lambda x: x.requires_grad, maml.parameters())
     num = sum(map(lambda x: np.prod(x.shape), tmp))
-    print(maml)
+    # print(maml)
     print('Total trainable tensors:', num)
 
+    root = 'miniimagenet/'
     # batchsz here means total episode number
-    mini = MiniImagenet('/home/i/tmp/MAML-Pytorch/miniimagenet/', mode='train', n_way=args.n_way, k_shot=args.k_spt,
+    mini = MiniImagenet(root, mode='train', n_way=args.n_way, k_shot=args.k_spt,
                         k_query=args.k_qry,
                         batchsz=10000, resize=args.imgsz)
-    mini_test = MiniImagenet('/home/i/tmp/MAML-Pytorch/miniimagenet/', mode='test', n_way=args.n_way, k_shot=args.k_spt,
+    mini_test = MiniImagenet(root, mode='test', n_way=args.n_way, k_shot=args.k_spt,
                              k_query=args.k_qry,
                              batchsz=100, resize=args.imgsz)
 
-    for epoch in range(args.epoch//10000):
+    for epoch in range(args.epoch // 10000):
         # fetch meta_batchsz num of episode each time
-        db = DataLoader(mini, args.task_num, shuffle=True, num_workers=1, pin_memory=True)
+        db = DataLoader(mini, args.task_num, shuffle=True, num_workers=8, pin_memory=True)
+        print("DataLoader length: ", len(db))
 
         for step, (x_spt, y_spt, x_qry, y_qry) in enumerate(db):
 
@@ -92,7 +95,6 @@ def main():
 
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--epoch', type=int, help='epoch number', default=60000)
     argparser.add_argument('--n_way', type=int, help='n way', default=5)
@@ -107,5 +109,16 @@ if __name__ == '__main__':
     argparser.add_argument('--update_step_test', type=int, help='update steps for finetunning', default=10)
 
     args = argparser.parse_args()
+
+    # modify command line arguments here for experiment purpose:
+    args.epoch = 10000
+    args.n_way = 5
+    args.k_spt = 1
+    args.k_qry = 15
+    args.task_num = 4
+    args.meta_lr = 1e-3
+    args.update_lr = 0.01
+    args.update_step = 5
+    args.update_step_test = 10
 
     main()

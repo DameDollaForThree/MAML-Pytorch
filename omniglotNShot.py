@@ -1,8 +1,8 @@
-from    omniglot import Omniglot
-import  torchvision.transforms as transforms
-from    PIL import Image
-import  os.path
-import  numpy as np
+from omniglot import Omniglot
+import torchvision.transforms as transforms
+from PIL import Image
+import os.path
+import numpy as np
 
 
 class OmniglotNShot:
@@ -13,12 +13,14 @@ class OmniglotNShot:
         :param root:
         :param batchsz: task num
         :param n_way:
-        :param k_shot:
-        :param k_qry:
+        :param k_shot: k-shot for the training set
+        :param k_qry: k-shot for the validation set
         :param imgsz:
         """
 
         self.resize = imgsz
+
+        # load the Omniglot dataset
         if not os.path.isfile(os.path.join(root, 'omniglot.npy')):
             # if root/data.npy does not exist, just download it
             self.x = Omniglot(root, download=True,
@@ -26,7 +28,7 @@ class OmniglotNShot:
                                                             lambda x: x.resize((imgsz, imgsz)),
                                                             lambda x: np.reshape(x, (imgsz, imgsz, 1)),
                                                             lambda x: np.transpose(x, [2, 0, 1]),
-                                                            lambda x: x/255.])
+                                                            lambda x: x / 255.])
                               )
 
             temp = dict()  # {label:img1, img2..., 20 imgs, label2: img1, img2,... in total, 1623 label}
@@ -54,7 +56,7 @@ class OmniglotNShot:
             print('load from omniglot.npy.')
 
         # [1623, 20, 84, 84, 1]
-        # TODO: can not shuffle here, we must keep training and test set distinct!
+        # TODO: can not shuffle here, we must keep training and test set distinct!!
         self.x_train, self.x_test = self.x[:1200], self.x[1200:]
 
         # self.normalization()
@@ -64,7 +66,7 @@ class OmniglotNShot:
         self.n_way = n_way  # n way
         self.k_shot = k_shot  # k shot
         self.k_query = k_query  # k query
-        assert (k_shot + k_query) <=20
+        assert (k_shot + k_query) <= 20
 
         # save pointer of current read batch in total cache
         self.indexes = {"train": 0, "test": 0}
@@ -114,7 +116,6 @@ class OmniglotNShot:
                 selected_cls = np.random.choice(data_pack.shape[0], self.n_way, False)
 
                 for j, cur_class in enumerate(selected_cls):
-
                     selected_img = np.random.choice(20, self.k_shot + self.k_query, False)
 
                     # meta-training and meta-test
@@ -136,7 +137,6 @@ class OmniglotNShot:
                 y_spts.append(y_spt)
                 x_qrys.append(x_qry)
                 y_qrys.append(y_qry)
-
 
             # [b, setsz, 1, 84, 84]
             x_spts = np.array(x_spts).astype(np.float32).reshape(self.batchsz, setsz, 1, self.resize, self.resize)
@@ -166,14 +166,11 @@ class OmniglotNShot:
         return next_batch
 
 
-
-
-
 if __name__ == '__main__':
 
-    import  time
-    import  torch
-    import  visdom
+    import time
+    import torch
+    import visdom
 
     # plt.ion()
     viz = visdom.Visdom(env='omniglot_view')
@@ -183,7 +180,6 @@ if __name__ == '__main__':
     for i in range(1000):
         x_spt, y_spt, x_qry, y_qry = db.next('train')
 
-
         # [b, setsz, h, w, c] => [b, setsz, c, w, h] => [b, setsz, 3c, w, h]
         x_spt = torch.from_numpy(x_spt)
         x_qry = torch.from_numpy(x_qry)
@@ -191,12 +187,9 @@ if __name__ == '__main__':
         y_qry = torch.from_numpy(y_qry)
         batchsz, setsz, c, h, w = x_spt.size()
 
-
         viz.images(x_spt[0], nrow=5, win='x_spt', opts=dict(title='x_spt'))
         viz.images(x_qry[0], nrow=15, win='x_qry', opts=dict(title='x_qry'))
         viz.text(str(y_spt[0]), win='y_spt', opts=dict(title='y_spt'))
         viz.text(str(y_qry[0]), win='y_qry', opts=dict(title='y_qry'))
 
-
         time.sleep(10)
-

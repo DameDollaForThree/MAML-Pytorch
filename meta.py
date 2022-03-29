@@ -1,20 +1,20 @@
-import  torch
-from    torch import nn
-from    torch import optim
-from    torch.nn import functional as F
-from    torch.utils.data import TensorDataset, DataLoader
-from    torch import optim
-import  numpy as np
+import torch
+from torch import nn
+from torch import optim
+from torch.nn import functional as F
+from torch.utils.data import TensorDataset, DataLoader
+from torch import optim
+import numpy as np
 
-from    learner import Learner
-from    copy import deepcopy
-
+from learner import Learner
+from copy import deepcopy
 
 
 class Meta(nn.Module):
     """
     Meta Learner
     """
+
     def __init__(self, args, config):
         """
 
@@ -31,12 +31,8 @@ class Meta(nn.Module):
         self.update_step = args.update_step
         self.update_step_test = args.update_step_test
 
-
         self.net = Learner(config, args.imgc, args.imgsz)
         self.meta_optim = optim.Adam(self.net.parameters(), lr=self.meta_lr)
-
-
-
 
     def clip_grad_by_norm_(self, grad, max_norm):
         """
@@ -59,55 +55,63 @@ class Meta(nn.Module):
             for g in grad:
                 g.data.mul_(clip_coef)
 
-        return total_norm/counter
-
+        return total_norm / counter
 
     def forward(self, x_spt, y_spt, x_qry, y_qry):
         """
+        One forward training step for the meta learner.
+        - Use the train set to update the child learner's parameter.
+        - Use the validation set to compute loss of the child learner and update the meta learner's parameter.
 
+        Train/support set:
         :param x_spt:   [b, setsz, c_, h, w]
         :param y_spt:   [b, setsz]
+
+        Validation/query set:
         :param x_qry:   [b, querysz, c_, h, w]
         :param y_qry:   [b, querysz]
-        :return:
+
+        :return: the avg_val_acc of all tasks at every update step / train_acc of the meta learner
         """
+
         task_num, setsz, c_, h, w = x_spt.size()
         querysz = x_qry.size(1)
 
+        # keep track of the performance on the validation set
         losses_q = [0 for _ in range(self.update_step + 1)]  # losses_q[i] is the loss on step i
         corrects = [0 for _ in range(self.update_step + 1)]
 
-
         for i in range(task_num):
 
-            # 1. run the i-th task and compute loss for k=0
-            logits = self.net(x_spt[i], vars=None, bn_training=True)
+            # 1. run the i-th task and compute loss for k=0 (1st update step)
+            logits = self.net(x_spt[i], vars=None, bn_training=True)  # [setsz, nway]
             loss = F.cross_entropy(logits, y_spt[i])
             grad = torch.autograd.grad(loss, self.net.parameters())
+
+            # use map() to pass the two arguments to the lambda function, and use list() to display them as a list
             fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, self.net.parameters())))
 
             # this is the loss and accuracy before first update
             with torch.no_grad():
-                # [setsz, nway]
-                logits_q = self.net(x_qry[i], self.net.parameters(), bn_training=True)
+                logits_q = self.net(x_qry[i], self.net.parameters(), bn_training=True)  # [setsz, nway]
                 loss_q = F.cross_entropy(logits_q, y_qry[i])
                 losses_q[0] += loss_q
 
-                pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
-                correct = torch.eq(pred_q, y_qry[i]).sum().item()
+                pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)  # [setsz]
+                correct = torch.eq(pred_q, y_qry[i]).sum().item()  # convert to numpy
                 corrects[0] = corrects[0] + correct
 
             # this is the loss and accuracy after the first update
             with torch.no_grad():
-                # [setsz, nway]
                 logits_q = self.net(x_qry[i], fast_weights, bn_training=True)
                 loss_q = F.cross_entropy(logits_q, y_qry[i])
                 losses_q[1] += loss_q
-                # [setsz]
+
                 pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
                 correct = torch.eq(pred_q, y_qry[i]).sum().item()
                 corrects[1] = corrects[1] + correct
 
+            # the following (K-1) update steps
             for k in range(1, self.update_step):
                 # 1. run the i-th task and compute loss for k=1~K-1
                 logits = self.net(x_spt[i], fast_weights, bn_training=True)
@@ -124,16 +128,14 @@ class Meta(nn.Module):
 
                 with torch.no_grad():
                     pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
-                    correct = torch.eq(pred_q, y_qry[i]).sum().item()  # convert to numpy
+                    correct = torch.eq(pred_q, y_qry[i]).sum().item()
                     corrects[k + 1] = corrects[k + 1] + correct
 
-
-
         # end of all tasks
-        # sum over all losses on query set across all tasks
-        loss_q = losses_q[-1] / task_num
+        # sum over all final losses on query set across all tasks
+        loss_q = losses_q[-1] / task_num  # only use the loss after the final update step
 
-        # optimize theta parameters
+        # optimize theta parameters of the meta learner
         self.meta_optim.zero_grad()
         loss_q.backward()
         # print('meta update')
@@ -141,20 +143,21 @@ class Meta(nn.Module):
         # 	print(torch.norm(p).item())
         self.meta_optim.step()
 
-
+        # return the average validation accuracy of all tasks at each update step as a list
         accs = np.array(corrects) / (querysz * task_num)
 
         return accs
 
-
     def finetunning(self, x_spt, y_spt, x_qry, y_qry):
         """
+        One testing step of the meta learner.
+        - Test on a test task (train and test the task)
 
         :param x_spt:   [setsz, c_, h, w]
         :param y_spt:   [setsz]
         :param x_qry:   [querysz, c_, h, w]
         :param y_qry:   [querysz]
-        :return:
+        :return: the final testing accuracy of the test task.
         """
         assert len(x_spt.shape) == 4
 
@@ -210,14 +213,11 @@ class Meta(nn.Module):
                 correct = torch.eq(pred_q, y_qry).sum().item()  # convert to numpy
                 corrects[k + 1] = corrects[k + 1] + correct
 
-
         del net
 
         accs = np.array(corrects) / querysz
 
         return accs
-
-
 
 
 def main():

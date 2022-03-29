@@ -1,12 +1,12 @@
-import  torch, os
-import  numpy as np
-from    omniglotNShot import OmniglotNShot
-import  argparse
+import torch, os
+import numpy as np
+from omniglotNShot import OmniglotNShot
+import argparse
 
-from    meta import Meta
+from meta import Meta
+
 
 def main(args):
-
     torch.manual_seed(222)
     torch.cuda.manual_seed_all(222)
     np.random.seed(222)
@@ -30,28 +30,34 @@ def main(args):
         ('linear', [args.n_way, 64])
     ]
 
+    # use GPU
     device = torch.device('cuda')
-    maml = Meta(args, config).to(device)
+    print("device: ", device)
+
+    maml = Meta(args, config).to(device)  # initialize the meta learner
 
     tmp = filter(lambda x: x.requires_grad, maml.parameters())
     num = sum(map(lambda x: np.prod(x.shape), tmp))
-    print(maml)
+    # print(maml)
     print('Total trainable tensors:', num)
 
     db_train = OmniglotNShot('omniglot',
-                       batchsz=args.task_num,
-                       n_way=args.n_way,
-                       k_shot=args.k_spt,
-                       k_query=args.k_qry,
-                       imgsz=args.imgsz)
+                             batchsz=args.task_num,
+                             n_way=args.n_way,
+                             k_shot=args.k_spt,
+                             k_query=args.k_qry,
+                             imgsz=args.imgsz)
 
     for step in range(args.epoch):
 
         x_spt, y_spt, x_qry, y_qry = db_train.next()
-        x_spt, y_spt, x_qry, y_qry = torch.from_numpy(x_spt).to(device), torch.from_numpy(y_spt).to(device), \
-                                     torch.from_numpy(x_qry).to(device), torch.from_numpy(y_qry).to(device)
+        x_spt, y_spt, x_qry, y_qry = torch.from_numpy(x_spt).to(device), torch.from_numpy(y_spt), \
+                                     torch.from_numpy(x_qry).to(device), torch.from_numpy(y_qry)
 
-        # set traning=True to update running_mean, running_variance, bn_weights, bn_bias
+        # cast the label from Int to Long type
+        y_spt, y_qry = y_spt.type(torch.LongTensor).to(device), y_qry.type(torch.LongTensor).to(device)
+
+        # set training=True to update running_mean, running_variance, bn_weights, bn_bias
         accs = maml(x_spt, y_spt, x_qry, y_qry)
 
         if step % 50 == 0:
@@ -59,16 +65,19 @@ def main(args):
 
         if step % 500 == 0:
             accs = []
-            for _ in range(1000//args.task_num):
+            for _ in range(1000 // args.task_num):
                 # test
                 x_spt, y_spt, x_qry, y_qry = db_train.next('test')
-                x_spt, y_spt, x_qry, y_qry = torch.from_numpy(x_spt).to(device), torch.from_numpy(y_spt).to(device), \
-                                             torch.from_numpy(x_qry).to(device), torch.from_numpy(y_qry).to(device)
+                x_spt, y_spt, x_qry, y_qry = torch.from_numpy(x_spt).to(device), torch.from_numpy(y_spt), \
+                                             torch.from_numpy(x_qry).to(device), torch.from_numpy(y_qry)
+
+                # cast the label from Int to Long type
+                y_spt, y_qry = y_spt.type(torch.LongTensor).to(device), y_qry.type(torch.LongTensor).to(device)
 
                 # split to single task each time
                 for x_spt_one, y_spt_one, x_qry_one, y_qry_one in zip(x_spt, y_spt, x_qry, y_qry):
                     test_acc = maml.finetunning(x_spt_one, y_spt_one, x_qry_one, y_qry_one)
-                    accs.append( test_acc )
+                    accs.append(test_acc)
 
             # [b, update_step+1]
             accs = np.array(accs).mean(axis=0).astype(np.float16)
@@ -76,7 +85,6 @@ def main(args):
 
 
 if __name__ == '__main__':
-
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--epoch', type=int, help='epoch number', default=40000)
     argparser.add_argument('--n_way', type=int, help='n way', default=5)
@@ -91,5 +99,16 @@ if __name__ == '__main__':
     argparser.add_argument('--update_step_test', type=int, help='update steps for finetunning', default=10)
 
     args = argparser.parse_args()
+
+    # modify command line arguments here for experiment purpose:
+    args.epoch = 1001
+    args.n_way = 5
+    args.k_spt = 1
+    args.k_qry = 15
+    args.task_num = 64
+    args.meta_lr = 1e-3
+    args.update_lr = 0.4
+    args.update_step = 5
+    args.update_step_test = 10
 
     main(args)

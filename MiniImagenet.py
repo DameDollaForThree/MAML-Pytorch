@@ -9,6 +9,9 @@ import csv
 import random
 
 
+def open_img(x):
+    return Image.open(x).convert('RGB')
+
 class MiniImagenet(Dataset):
     """
     put mini-imagenet files as :
@@ -47,7 +50,7 @@ class MiniImagenet(Dataset):
         mode, batchsz, n_way, k_shot, k_query, resize))
 
         if mode == 'train':
-            self.transform = transforms.Compose([lambda x: Image.open(x).convert('RGB'),
+            self.transform = transforms.Compose([transforms.Lambda(open_img),  # can't pickle lambda function in windows
                                                  transforms.Resize((self.resize, self.resize)),
                                                  # transforms.RandomHorizontalFlip(),
                                                  # transforms.RandomRotation(5),
@@ -55,7 +58,7 @@ class MiniImagenet(Dataset):
                                                  transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
                                                  ])
         else:
-            self.transform = transforms.Compose([lambda x: Image.open(x).convert('RGB'),
+            self.transform = transforms.Compose([transforms.Lambda(open_img),
                                                  transforms.Resize((self.resize, self.resize)),
                                                  transforms.ToTensor(),
                                                  transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
