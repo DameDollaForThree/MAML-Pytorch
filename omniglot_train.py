@@ -101,11 +101,11 @@ if __name__ == '__main__':
     args = argparser.parse_args()
 
     # modify command line arguments here for experiment purpose:
-    args.epoch = 1001
+    args.epoch = 40000
     args.n_way = 5
     args.k_spt = 1
     args.k_qry = 15
-    args.task_num = 64
+    args.task_num = 32
     args.meta_lr = 1e-3
     args.update_lr = 0.4
     args.update_step = 5
